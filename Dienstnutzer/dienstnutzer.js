@@ -20,7 +20,4 @@ device.forEach(function(doc,err){
 });
 
 //Server beendet sich nach der Übertragung
-setTimeout(function(){process.exit()},1000);
-/*Zugriff über ssh openhabian@IP-Adresse oder IP-Adresse:8080 (Weboberfläche)
-
-*/
+/*Zugriff über ssh openhabian@IP-Adresse oder IP-Adresse:8080 (Weboberfläche)*/
