@@ -1,0 +1,355 @@
+<html>
+  <head>
+    <title>PP Test Recommender</title>
+    <script src="https://code.jquery.com/jquery-3.0.0.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      var socket = io();
+      $( document ).ready(function() {
+        $("#username").click(function(){
+          socket.emit('username',{username: document.getElementById('UN').value});
+          socket.on('getUN', function(msg){
+            if(msg == null){
+              //Falsche Eingabe verhindern:
+              document.getElementById('recommend').innerHTML = "Bitte gültigen Benutzernamen eingeben";
+            }
+            else{
+
+              var curUser = [];
+              var curOther = {username: "platzhalter", deviceList: []};
+              var curOther2 = {username: "platzhalter", deviceList: []};
+              var othersList = [];
+              var udList = msg.resultArray;
+
+              for(var i = 0; i < udList.length; i++){
+                //Aktueller Benutzer wird aus der Liste entfernt und seine Geräte zwischengespeichert
+                if(document.getElementById('UN').value == udList[i].username){
+                  curUser.push(udList[i].productname);
+                  udList.splice(i,1);
+                  i--;
+                }
+              }
+              for(var i = 0; i < udList.length; i++){
+                //Ist der Benutzer noch immer der gleiche?
+                if(curOther.username == udList[i].username){
+                  //Füge weiteres Gerät der Liste hinzu
+                  curOther.deviceList.push(udList[i].productname);
+                }
+                //Ist der Benutzername noch nicht in der Liste?
+                if(curOther.username != udList[i].username){
+                  //Dann erstelle neue Datenstruktur: Benutzer bekommt Geräte zugeordnet (Geräte bestanden bisher aus eigenen Einträgen in der DB)
+                  curOther = Object.create(curOther2);
+                  curOther.deviceList =[];
+                  curOther.username = udList[i].username;
+                  curOther.deviceList.push(udList[i].productname);
+                }
+                //Ist das Gerät das letzte des Benutzers?
+                if(i+1 < udList.length && udList[i+1].username != curOther.username){
+                  //Dann füge den Benutzer mit all seinen Geräten der finalen Liste hinzu
+                  othersList.push(curOther);
+                }
+              }
+              var matchingDeviceCounter = 0;
+              var missmatchDeviceCounter = 0;
+              var matchingUsers = 0;
+              //Alle Benutzer "Schleife"
+              for(var i = 0; i < othersList.length; i++){
+                //Vom aktuellen Benutzer alle Geräte "Schleife"
+                for(var j = 0; j < curUser.length; j++){
+                  //Von allen Benutzern alle Geräte "Schleife"
+                  for(var k = 0; k < othersList[i].deviceList.length; k++){
+                    //Ist das Gerät des aktuellen Benutzers in der Liste des Gerätes von allen anderen Benutzern?
+                    if(othersList[i].deviceList[k] == curUser[j]) {
+                      matchingDeviceCounter++;
+                    }
+                  }
+                }
+                //Nicht passende Geräte eines anderen Benutzers "zählen"
+                missmatchDeviceCounter = othersList[i].deviceList.length - matchingDeviceCounter;
+
+                //Bedingung: Mind. ein gleiches Gerät und mind. ein anderes Gerät muss erfüllt sein, um als passend deklariert zu werden
+                if(missmatchDeviceCounter != 0 && matchingDeviceCounter != 0){
+                  matchingUsers++;
+                  matchingDeviceCounter = 0;
+                  missmatchDeviceCounter = 0;
+
+                }
+                else{
+                  //Unpassende Person wird aus der Liste gelöscht, da Anforderungen nicht erfüllt
+                  matchingDeviceCounter = 0;
+                  missmatchDeviceCounter = 0;
+                  othersList.splice(i,1);
+                  i--;
+                }
+              }
+              console.log("matchingUsers: " + matchingUsers);
+
+              var ol = [];
+              function deviceListFilter(value){
+                var counter = 0;
+                //Ist das Gerät passend?
+                for(var i = 0; i < curUser.length; i++)
+                  if(curUser[i] == value)
+                    counter++;
+                return counter == 0;
+
+              }
+              //Unpassende Geräte werden aus der Liste gelöscht
+              for(var i = 0; i < othersList.length; i++){
+                ol.push(othersList[i].deviceList.filter(deviceListFilter))
+              }
+              console.log(ol);
+              var counter = [];
+              var name = [];
+              var temp = 0;
+
+              //Neue Personen Liste wird durchgegangen: Alle passenden Benutzer
+              for (var i = 0; i < ol.length; i++){
+                //Alle passenden Geräte werden in zwei neue Listen geschrieben: Name und Zähler
+                for(var j = 0; j < ol[i].length; j++){
+                  //Noch keine Einträge?
+                  if(name.length == 0){
+                    //Lege den ersten an
+                    name.push(ol[i][j]);
+                    counter.push(1);
+                  }
+                  else{
+                    temp = 0;
+                    for(var k = 0; k < name.length; k++){
+                      //Kommt das Gerät in der Liste vor?
+                      if(name[k] == ol[i][j]){
+                        //Erhöhe die Counter:
+                        counter[k]++;
+                        temp++;
+                      }
+                      //Ist die Liste zu ende und es kommt ein neues Gerät als nächstes
+                      else if(temp == 0 && (name.length-1) == k){
+                        //Speichere die Liste mit entsprechender Anzahl der Geräte
+                        name.push(ol[i][j]);
+                        counter.push(1);
+                      }
+                    }
+                  }
+                }
+              }
+              //Konsolen Ausgabe:
+              for(var i = 0; i < name.length; i++){
+                console.log("name: " + name[i] + " Anteil: " + Math.round((counter[i]/matchingUsers)*100) + "%" );
+              }
+              //Sortiert die Liste
+              var sortedList = [];
+              for(var i = 0; i < counter.length; i++)
+                sortedList.push({'productname': name[i], 'percentage': Math.round((counter[i]/matchingUsers)*100)});
+
+              sortedList.sort(function(a,b){
+                return ((a.percentage < b.percentage) ? - 1 : ((a.percentage == b.percentage) ? 0 : 1));
+              });
+
+              //Ausgabe vorbereiten:
+              var recommend = "";
+              recommend = "<table><tr><th>Gerät</th><th>Kaufempfehlung(in %)</th></tr>";
+              for(var i = sortedList.length-1; i >= 0; i--){
+                recommend += "<tr><td>" + sortedList[i].productname + "</td><td>" + sortedList[i].percentage + "</td></tr>" ;
+              }
+              recommend += "</table>";
+              //Ausgeben:
+              document.getElementById('recommend').innerHTML = recommend;
+            }
+          });
+        });
+      });
+    </script>
+    <style>
+    /*Tabellen Anpassung: */
+      table{
+        font-family: arial, sans-serif;
+        border-collapse: collapse;
+        width: 50%;
+      }
+      td,th{
+        border: 1px solid #dddddd;
+        text-align: : left;
+        padding: 8px;
+      }
+      th{
+        text-align: left;
+      }
+      tr:nth-child(even){
+        background-color: #dddddd;
+      }
+    </style>
+  </head>
+  <body bgcolor="#DDDDDD">
+    <h1>Scanning for IoT Appliances and Recommendation of IoT Services</h1>
+    <p>E-Mail Adresse eingeben: <input type="text" id="UN"/>
+
+    <input type="button" id="username" value="Suchen"/>
+    <p id="recommend"> </p>
+
+
+  </body>
+</html>
+
+
+
+<!--var userDeviceList = [];
+var user = new Object();
+user.username = udList[0].username;
+user.username.device = [];
+var userCounter = 0;
+for(var i = 1; i < udList.length; i++){
+  if(user.username == udList[i].username){
+    user.username.device.push("udList[i].productname");
+    userCounter++;
+  }
+  else{
+    userDeviceList.push(user);
+    userCounter = 0;
+    user.username = {username: udList[i].username};
+  }
+}
+
+document.getElementById('recommend').innerHTML = userDeviceList.length;
+/*var userDeviceList = [];
+var tempUser = "";
+var userCounter = 0;
+for(var i = 0; i < udList.length; i++){
+  if(udList[i].username == tempUser){
+    userDeviceList[userCounter].username = tempUser;
+    userDeviceList[userCounter].username.device.push(udList[i].productname);
+  }
+  else{
+    tempUser = udList[i].username;
+    userDeviceList[userCounter].username.push(tempUser);
+    userDeviceList[userCounter].username.device.push(udList[i].productname);
+  }
+}
+document.getElementById('recommend').innerHTML = userDeviceList.length;*/
+/*
+Object.keys(userDeviceList).forEach(function(doc,err){
+  document.getElementById('recommend').innerHTML += doc;
+});*/
+
+
+
+Code2 Algo:
+var udList = msg.resultArray;
+var ownList = [];
+//var othersList = [];
+var otherName = "";
+var otherCounter = 0;
+var deviceCounter = 0;
+
+var othersList = [{username: "",
+                    deviceList: ["1","2"]
+                  }];
+
+for(var i = 0; i < udList.length; i++){
+  if(udList[i].username == document.getElementById('UN').value){
+    ownList.push(udList[i].productname);
+    console.log("I username == username: " + i);
+    console.log("OC: " + otherCounter);
+  }
+  else{
+    if(otherCounter > 0){
+      othersList[otherCounter] = Object.create(othersList[0]);
+      othersList[otherCounter].username = udList[i].username;
+      deviceCounter = 0;
+      //console.log("OL: " + othersList[otherCounter].username + " UL: " + udList[i].username);
+      console.log("OL: " + othersList[otherCounter].username + " OC: " + otherCounter + " i: " + i + " UD: " + udList[i].username);
+      while(othersList[otherCounter].username == udList[i-1].username){
+        console.log("Othercounter: " + otherCounter);
+        console.log("Ich bin noch der gleiche User");
+        othersList[otherCounter].deviceList[deviceCounter] = udList[i].productname;
+        deviceCounter++;
+        i++;
+      }
+    }
+    else{
+      othersList[0].username = udList[i].username;
+      deviceCounter = 0;
+      //console.log("OL: " + othersList[otherCounter].username + " UL: " + udList[i].username);
+      while(othersList[0].username == udList[i].username){
+        othersList[0].deviceList[deviceCounter] = udList[i].productname;
+        deviceCounter++;
+        i++;
+      }
+    }
+    otherCounter++;
+    //console.log("i "+ i);
+  }
+
+
+
+
+  //2. Versuch:
+  var curUser = [];
+  var othersList = [{username: "platzhalter", deviceList: []}];
+  var udList = msg.resultArray;
+  for(var i = 0; i < udList.length; i++){
+    if(document.getElementById('UN').value == udList[i].username)
+      curUser.push(udList[i].productname);
+    else{
+      if(othersList[0].username == "platzhalter"){
+        othersList[0].username = udList[i].username;
+        othersList[0].deviceList[othersList[0].deviceList.length] = udList[i].productname;
+        //console.log("1Username: " + othersList[0].username);
+        //console.log("1Device: " + othersList[0].deviceList[othersList[0].deviceList.length]);
+        while(othersList[0].username == udList[i+othersList[0].deviceList.length-1].username)
+          othersList[0].deviceList[othersList[0].deviceList.length] = udList[i].productname;
+      }
+      else{
+        othersList[othersList.length] = Object.create(othersList[0]);
+        othersList[othersList.length-1].deviceList = [];
+        othersList[othersList.length-1].username = udList[i].username;
+        othersList[othersList.length-1].deviceList[othersList[othersList.length-1].deviceList.length] = udList[i].productname;
+        console.log("2Username: " + othersList[0].username);
+        console.log("2Device: " + othersList[0].deviceList[othersList[0].deviceList.length]);
+        while(othersList[othersList.length-1].username == udList[i+othersList[othersList.length-1].deviceList.length-1].username && i < udList.length)
+          othersList[othersList.length-1].deviceList[othersList[othersList.length-1].deviceList.length] = udList[i].productname;
+      }
+      i+=othersList[othersList.length-1].deviceList.length;
+    }
+  }
+
+  Zähle einzelne Devices funktioniert nicht
+  var dev = [];
+  var name = [" "];
+  var counter = 0;
+  //Nur passende Nutzer vergleichen
+  for(var i = 0; i < othersList.length; i++){
+    for(var j = 0; j < curUser.length; j++){
+      for(var k = 0; k < othersList[i].deviceList.length; k++){
+        if(curUser[j] == othersList[i].deviceList[k]) {
+          othersList[i].deviceList.splice(k,1);
+          k--;
+        }
+        //Dauerschleife muss überarbeitet werden
+        else if(curUser[j] != othersList[i].deviceList[k] && othersList[i].deviceList[k] != undefined){
+          if(dev.length == 0){
+            dev.push(1);
+            name[0] = othersList[i].deviceList[k];
+          }
+          else{
+            for (var l = 0; l < dev.length; l++){
+              console.log("Other: " + othersList[i].deviceList[k] + " Name: " + name[l]);
+              if(name[l] != othersList[i].deviceList[k]){
+                dev.push(1);
+                name.push(othersList[i].deviceList[k]);
+                console.log("Dev: " + dev[l] + " name: " + name[l] );
+              }
+              else if(name[l] == othersList[i].deviceList[k]){
+                console.log("Im else");
+                dev[l] = dev[l] + 1;
+                console.log("Dev: " + dev[l] + " name: " + name[l] + " length: " + dev.length);
+              }
+              if(l == 10){
+                return;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+-->
